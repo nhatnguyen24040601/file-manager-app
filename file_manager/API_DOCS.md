@@ -63,8 +63,14 @@ Retrieves a deeply nested JSON structure representing the folder tree up to a sp
 
 *Folders and Files share the same base structure (`SecurableObject`), meaning renaming, moving, and deleting are completely unified endpoints!*
 
-### Create a Folder
+### List or Create Folders
+Retrieves a list of folders (defaults to top-level Root folders) or creates a new folder.
+
 * **URL:** `/file/folders/`
+* **Method:** `GET`
+* **Optional Query Param:** `?root=false` (To get ALL folders in the database instead of just Root folders).
+* **Success Response (200 OK):** `[ { "id": "uuid", "name": "Root", "owner": 1, "parent": null } ]`
+
 * **Method:** `POST`
 * **Body:**
 ```json

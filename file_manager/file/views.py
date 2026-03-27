@@ -148,9 +148,19 @@ class ObjectMoveView(APIView):
 
 class FolderCreateView(APIView):
     """
+    GET: List folders (Defaults to Root folders).
     POST: Creates a new folder, base object, and updates Closure Table.
     """
     permission_classes = [AllowAny]
+
+    def get(self, request):
+        is_root = request.query_params.get('root', 'true').lower() == 'true'
+        if is_root:
+            folders = Folder.objects.filter(parent__isnull=True)
+        else:
+            folders = Folder.objects.all()
+        return Response(FolderSerializer(folders, many=True).data)
+
     @transaction.atomic
     def post(self, request):
         serializer = FolderCreateSerializer(data=request.data)

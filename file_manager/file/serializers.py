@@ -47,3 +47,17 @@ class NestedFolderSerializer(serializers.ModelSerializer):
                 context={'depth': depth, 'current_level': current_level + 1}
             ).data
         return
+
+class FolderCreateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=255)
+    parent_id = serializers.UUIDField(required=True)
+
+class FileCreateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=255)
+    parent_id = serializers.UUIDField(required=True)
+    file_size = serializers.IntegerField(required=False, allow_null=True)
+    mime_type = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    sha256_hash = serializers.CharField(max_length=255, required=False, allow_blank=True)
+
+class ObjectRenameSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=255)

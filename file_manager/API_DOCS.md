@@ -1,13 +1,13 @@
 # Enterprise File Manager v2 - API Documentation
 
-This document explains how to interact with the File Manager API. It covers navigating the folder hierarchy, managing files, and configuring advanced bitmask-based permissions.
+This document explains how to interact with the fully completed File Manager API. It covers navigating the folder hierarchy, managing files (CRUD), moving items, and configuring advanced bitmask-based permissions.
 
 ---
 
 ## 1. Navigating Folders & Files (READ)
 
 ### Get Folder Details & Breadcrumbs
-Retrieves a folder's metadata, its subfolders, files, and its breadcrumb path from the Root folder.
+Retrieves a folder's metadata, its subfolders, files, and its breadcrumb path from the Root folder (calculated instantly via Closure Table).
 
 * **URL:** `/file/folders/{folder_uuid}/`
 * **Method:** `GET`
@@ -59,26 +59,39 @@ Retrieves a deeply nested JSON structure representing the folder tree up to a sp
 
 ---
 
-## 2. Managing Objects (Create, Update, Delete, Move)
+## 2. Managing Objects (CREATE, UPDATE, DELETE)
 
-> *Note: While the Database/Models support full CRUD via the Closure table, the specific Create/Update/Delete endpoints may need to be wired up in `views.py` using standard Django Rest Framework ViewSets. The `Move` endpoint is fully implemented.*
+*Folders and Files share the same base structure (`SecurableObject`), meaning renaming, moving, and deleting are completely unified endpoints!*
 
-### Create a Folder / File
-To create a file or folder, the backend assigns a parent folder and automatically generates the `ObjectPath` closure table links.
-
-* **URL:** `/file/objects/` *(Conceptual Endpoint)*
+### Create a Folder
+* **URL:** `/file/folders/`
 * **Method:** `POST`
 * **Body:**
 ```json
 {
-    "name": "New Project Ideas.txt",
-    "type": "file",
+    "name": "New Project Workspace",
     "parent_id": "5ecd4d8a-fe24-4f62-a883-0c7b2097aace"
 }
 ```
 
-### Rename an Object
-* **URL:** `/file/objects/{object_uuid}/` *(Conceptual Endpoint)*
+### Create a File (Metadata)
+Creates the file record and automatically connects it to the Closure Table hierarchy.
+* **URL:** `/file/files/`
+* **Method:** `POST`
+* **Body:**
+```json
+{
+    "name": "Financial_Report_Q1.pdf",
+    "parent_id": "5ecd4d8a-fe24-4f62-a883-0c7b2097aace",
+    "file_size": 2048500,
+    "mime_type": "application/pdf",
+    "sha256_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}
+```
+
+### Rename a Folder or File (UPDATE)
+Updates the human-readable text name tied to the File/Folder.
+* **URL:** `/file/objects/{object_uuid}/rename/`
 * **Method:** `PATCH`
 * **Body:**
 ```json
@@ -87,9 +100,8 @@ To create a file or folder, the backend assigns a parent folder and automaticall
 }
 ```
 
-### Move an Object to a New Folder
-This endpoint securely moves a file or folder to a new parent folder, automatically recalculating the entire `ObjectPath` hierarchy without breaking deep child relationships.
-
+### Move a Folder or File (UPDATE)
+Securely moves an item (and all of its children if it's a folder) to a new parent folder, automatically recalculating the entire `ObjectPath` hierarchy.
 * **URL:** `/file/objects/{object_uuid}/move/`
 * **Method:** `PATCH`
 * **Body:**
@@ -98,17 +110,12 @@ This endpoint securely moves a file or folder to a new parent folder, automatica
     "new_parent_id": "e3369a0e-299d-42ad-bab2-67c404984a09"
 }
 ```
-* **Success Response (200 OK):**
-```json
-{
-    "status": "moved"
-}
-```
 
-### Soft-Delete an Object
-Sets `deleted_at` on the object. It will remain in the database but be hidden from normal API queries.
-* **URL:** `/file/objects/{object_uuid}/` *(Conceptual Endpoint)*
+### Soft-Delete a Folder or File (REMOVE / DELETE)
+Performs an Enterprise "Soft Delete" by stamping `deleted_at = timezone.now()` on the base object. It remains in the database for auditing and recovery but disappears from normal views.
+* **URL:** `/file/objects/{object_uuid}/`
 * **Method:** `DELETE`
+* **Success Response (204 No Content):** `(Empty Body - Deleted successfully)`
 
 ---
 
@@ -206,4 +213,3 @@ Revokes all explicit permissions for the listed user(s) on this object.
     ]
 }
 ```
-* **Success Response (200 OK):** Returns the updated array of permissions currently active on the object.

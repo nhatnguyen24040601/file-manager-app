@@ -2,12 +2,17 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, exceptions, permissions
 from rest_framework.permissions import AllowAny
+from django.utils import timezone
+from django.contrib.auth import get_user_model
 from django.db import transaction
-from .models import SecurableObject, Folder, File, Permission, ObjectPath
+from .models import SecurableObject, Folder, File, Permission, ObjectPath, ObjectType
 from .serializers import (
     FolderSerializer, FileSerializer, PermissionSerializer, 
-    SecurableObjectSerializer, NestedFolderSerializer
+    SecurableObjectSerializer, NestedFolderSerializer,
+    FolderCreateSerializer, FileCreateSerializer, ObjectRenameSerializer
 )
+
+User = get_user_model()
 
 class FolderDetailView(APIView):
     """
@@ -139,3 +144,112 @@ class ObjectMoveView(APIView):
             folder_record.save()
 
         return Response({"status": "moved"})
+
+class FolderCreateView(APIView):
+    """
+    POST: Creates a new folder, base object, and updates Closure Table.
+    """
+    permission_classes = [AllowAny]
+    @transaction.atomic
+    def post(self, request):
+        serializer = FolderCreateSerializer(data=request.data)
+        if serializer.is_valid():
+            parent_id = serializer.validated_data['parent_id']
+            try:
+                parent_folder = Folder.objects.get(pk=parent_id)
+            except Folder.DoesNotExist:
+                return Response({"error": "Parent folder not found."}, status=status.HTTP_404_NOT_FOUND)
+
+            owner = request.user if request.user.is_authenticated else User.objects.first()
+            if not owner:
+                return Response({"error": "No users available for ownership."}, status=status.HTTP_400_BAD_REQUEST)
+
+            new_folder = Folder.objects.create(
+                name=serializer.validated_data['name'],
+                type=ObjectType.FOLDER,
+                owner=owner,
+                parent=parent_folder
+            )
+
+            ObjectPath.objects.create(ancestor=new_folder, descendant=new_folder, depth=0)
+            ancestors = ObjectPath.objects.filter(descendant=parent_folder)
+            new_paths = [
+                ObjectPath(ancestor=p.ancestor, descendant=new_folder, depth=p.depth + 1) 
+                for p in ancestors
+            ]
+            ObjectPath.objects.bulk_create(new_paths)
+
+            return Response(FolderSerializer(new_folder).data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class FileCreateView(APIView):
+    """
+    POST: Creates a file metadata object and maps it in closure table.
+    """
+    permission_classes = [AllowAny]
+    @transaction.atomic
+    def post(self, request):
+        serializer = FileCreateSerializer(data=request.data)
+        if serializer.is_valid():
+            parent_id = serializer.validated_data['parent_id']
+            try:
+                parent_folder = Folder.objects.get(pk=parent_id)
+            except Folder.DoesNotExist:
+                return Response({"error": "Parent folder not found."}, status=status.HTTP_404_NOT_FOUND)
+
+            owner = request.user if request.user.is_authenticated else User.objects.first()
+            if not owner:
+                return Response({"error": "No users available for ownership."}, status=status.HTTP_400_BAD_REQUEST)
+
+            new_file = File.objects.create(
+                name=serializer.validated_data['name'],
+                type=ObjectType.FILE,
+                owner=owner,
+                file_size=serializer.validated_data.get('file_size'),
+                mime_type=serializer.validated_data.get('mime_type'),
+                sha256_hash=serializer.validated_data.get('sha256_hash'),
+            )
+
+            ObjectPath.objects.create(ancestor=new_file, descendant=new_file, depth=0)
+            ancestors = ObjectPath.objects.filter(descendant=parent_folder)
+            new_paths = [
+                ObjectPath(ancestor=p.ancestor, descendant=new_file, depth=p.depth + 1) 
+                for p in ancestors
+            ]
+            ObjectPath.objects.bulk_create(new_paths)
+
+            return Response(FileSerializer(new_file).data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class ObjectRenameView(APIView):
+    """
+    PATCH: Renames a securable object.
+    """
+    permission_classes = [AllowAny]
+    def patch(self, request, pk):
+        try:
+            obj = SecurableObject.objects.get(pk=pk)
+        except SecurableObject.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        
+        serializer = ObjectRenameSerializer(data=request.data)
+        if serializer.is_valid():
+            obj.name = serializer.validated_data['name']
+            obj.save(update_fields=['name'])
+            return Response({"status": "renamed", "name": obj.name})
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class ObjectDeleteView(APIView):
+    """
+    DELETE: Soft-deletes a securable object.
+    """
+    permission_classes = [AllowAny]
+    def delete(self, request, pk):
+        try:
+            obj = SecurableObject.objects.get(pk=pk)
+        except SecurableObject.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        
+        obj.deleted_at = timezone.now()
+        obj.save(update_fields=['deleted_at'])
+        return Response({"status": "deleted"}, status=status.HTTP_204_NO_CONTENT)

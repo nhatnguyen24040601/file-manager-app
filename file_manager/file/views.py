@@ -366,3 +366,14 @@ class GroupMembershipView(APIView):
                 return Response({"error": "User was not in group."}, status=status.HTTP_404_NOT_FOUND)
             return Response({"status": "user removed from group"}, status=status.HTTP_204_NO_CONTENT)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class GlobalTreeView(APIView):
+    """
+    GET: Returns the entire folder structure tree starting from root folders.
+    """
+    permission_classes = [AllowAny]
+    def get(self, request):
+        depth = int(request.query_params.get('depth', 10)) # Default to very deep for admin
+        roots = Folder.objects.filter(parent__isnull=True)
+        serializer = NestedFolderSerializer(roots, many=True, context={'depth': depth})
+        return Response(serializer.data)

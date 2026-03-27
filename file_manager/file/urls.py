@@ -2,10 +2,12 @@ from django.urls import path
 from .views import (
     FolderDetailView, FolderTreeView, ObjectPermissionView, ObjectMoveView,
     FolderCreateView, FileCreateView, ObjectRenameView, ObjectDeleteView,
-    UserListView, GroupListCreateView, GroupDetailView, GroupMembershipView
+    UserListView, GroupListCreateView, GroupDetailView, GroupMembershipView,
+    GlobalTreeView
 )
 
 urlpatterns = [
+    path('tree/', GlobalTreeView.as_view(), name='global-tree'),
     path('users/', UserListView.as_view(), name='user-list'),
     path('groups/', GroupListCreateView.as_view(), name='group-list'),
     path('groups/<uuid:pk>/', GroupDetailView.as_view(), name='group-detail'),

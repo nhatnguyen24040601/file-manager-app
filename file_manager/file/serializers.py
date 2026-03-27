@@ -49,7 +49,7 @@ class NestedFolderSerializer(serializers.ModelSerializer):
                 many=True, 
                 context={'depth': depth, 'current_level': current_level + 1}
             ).data
-        return
+        return []
 
 class FolderCreateSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=255)

@@ -57,6 +57,13 @@ Retrieves a deeply nested JSON structure representing the folder tree up to a sp
 }
 ```
 
+### Get Global File Tree
+Retrieves a deeply nested JSON structure of the entire database grouped from all root folders downwards. Excellent for Admin overviews.
+
+* **URL:** `/file/tree/?depth=10`
+* **Method:** `GET`
+* **Success Response (200 OK):** An array of all Root records, each containing nested `children` arrays identical to the structure above.
+
 ---
 
 ## 2. Managing Objects (CREATE, UPDATE, DELETE)

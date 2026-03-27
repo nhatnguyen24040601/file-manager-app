@@ -1,0 +1,141 @@
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status, exceptions, permissions
+from rest_framework.permissions import AllowAny
+from django.db import transaction
+from .models import SecurableObject, Folder, File, Permission, ObjectPath
+from .serializers import (
+    FolderSerializer, FileSerializer, PermissionSerializer, 
+    SecurableObjectSerializer, NestedFolderSerializer
+)
+
+class FolderDetailView(APIView):
+    """
+    GET: Retrieves folder metadata, breadcrumbs, and immediate children.
+    """
+    permission_classes = [AllowAny]
+    def get(self, request, pk):
+        try:
+            folder = Folder.objects.get(pk=pk)
+            
+            # 1. Get breadcrumbs via Closure Table (O(1) ancestry check)
+            breadcrumbs = ObjectPath.objects.filter(descendant=folder).select_related('ancestor').order_by('-depth')
+            path_collection = [
+                {"id": p.ancestor.id, "name": p.ancestor.name} for p in breadcrumbs
+            ]
+
+            # 2. List immediate children (Folders first, then Files)
+            subfolders = Folder.objects.filter(parent=folder)
+            
+            # File references use ObjectPath since it doesn't have an explicit parent field in DBML
+            file_paths = ObjectPath.objects.filter(ancestor=folder, depth=1, descendant__type='file').select_related('descendant__file_detail')
+            files = [p.descendant.file_detail for p in file_paths if hasattr(p.descendant, 'file_detail')]
+
+            return Response({
+                "metadata": FolderSerializer(folder).data,
+                "path_collection": path_collection,
+                "entries": {
+                    "folders": FolderSerializer(subfolders, many=True).data,
+                    "files": FileSerializer(files, many=True).data
+                }
+            })
+        except Folder.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+class FolderTreeView(APIView):
+    """
+    GET: Returns a nested JSON structure for sidebar navigation.
+    """
+    permission_classes = [AllowAny]
+    def get(self, request, pk):
+        try:
+            folder = Folder.objects.get(pk=pk)
+            depth = int(request.query_params.get('depth', 3))
+            serializer = NestedFolderSerializer(folder, context={'depth': depth})
+            return Response(serializer.data)
+        except Folder.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+class ObjectPermissionView(APIView):
+    """
+    GET: List all ACL entries for an object.
+    PUT: Update permissions (Add/Overwrite).
+    """
+    permission_classes = [AllowAny]
+    def get(self, request, pk):
+        perms = Permission.objects.filter(securable_object_id=pk)
+        serializer = PermissionSerializer(perms, many=True)
+        return Response(serializer.data)
+
+    def put(self, request, pk):
+        op_type = request.data.get('opType', 1)  # 1=Upsert, 2=Overwrite All, 3=Remove Specific
+        permissions_data = request.data.get('permissions', [])
+
+        if op_type == 2:
+            # FULL RESET: Delete everything for this object and start fresh
+            Permission.objects.filter(securable_object_id=pk).delete()
+
+        for item in permissions_data:
+            p_id = item.get('principal_id')
+            p_type = item.get('principal_type')
+            
+            if not p_id or not p_type:
+                continue
+
+            if op_type == 3:
+                # REMOVE: Delete permissions for this specific principal
+                Permission.objects.filter(
+                    securable_object_id=pk, 
+                    principal_id=p_id, 
+                    principal_type=p_type
+                ).delete()
+            else:
+                # UPSERT: Update if exists, otherwise create
+                Permission.objects.update_or_create(
+                    securable_object_id=pk,
+                    principal_id=p_id,
+                    principal_type=p_type,
+                    defaults={
+                        "allow_mask": item.get('allow_mask', 0),
+                        "deny_mask": item.get('deny_mask', 0),
+                        "inheritance_flags": item.get('inheritance_flags', '')
+                    }
+                )
+
+        # Return updated permissions
+        perms = Permission.objects.filter(securable_object_id=pk)
+        return Response(PermissionSerializer(perms, many=True).data)
+
+class ObjectMoveView(APIView):
+    """
+    PATCH: Moves an object to a new parent and updates the Closure Table.
+    """
+    permission_classes = [AllowAny]
+    @transaction.atomic
+    def patch(self, request, pk):
+        new_parent_id = request.data.get('new_parent_id')
+        try:
+            obj = SecurableObject.objects.get(pk=pk)
+            new_parent = Folder.objects.get(pk=new_parent_id)
+        except (SecurableObject.DoesNotExist, Folder.DoesNotExist):
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        # 1. Delete old paths for this object and its descendants
+        ObjectPath.objects.filter(descendant=obj).delete()
+
+        # 2. Re-calculate Closure Table rows
+        ancestors = ObjectPath.objects.filter(descendant=new_parent)
+        new_paths = [
+            ObjectPath(ancestor=p.ancestor, descendant=obj, depth=p.depth + 1)
+            for p in ancestors
+        ]
+        new_paths.append(ObjectPath(ancestor=obj, descendant=obj, depth=0))
+        ObjectPath.objects.bulk_create(new_paths)
+
+        # 3. Update actual parent pointer (only applicable to Folders in DBML)
+        if obj.type == 'folder':
+            folder_record = Folder.objects.get(pk=obj.id)
+            folder_record.parent = new_parent
+            folder_record.save()
+
+        return Response({"status": "moved"})

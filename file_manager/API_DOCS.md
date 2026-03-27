@@ -121,6 +121,8 @@ Performs an Enterprise "Soft Delete" by stamping `deleted_at = timezone.now()` o
 
 ## 3. Dealing with Permissions (ACLs)
 
+> **Important Note**: Files and Folders use the exact same endpoint for permissions. Also, Users and Groups use the exact same endpoint! You simply switch the UUID and specify whether it is a `"user"` or `"group"`.
+
 The permission system uses integer bitmasks to allow multiple rights to be grouped into a single number.
 
 ### Bitmask Reference Table:
@@ -136,44 +138,22 @@ The permission system uses integer bitmasks to allow multiple rights to be group
 | `128` | `WRITE_ACL` | Change permissions for other users. |
 | `256` | `TRAVERSE` | Pass through a folder to reach a deeper folder. |
 
-**Example:** To give a user `READ_DATA` (1), `WRITE_DATA` (2), and `CREATE` (8), you send `1 + 2 + 8 = 11` for the `allow_mask`.
-
-### Get Object Permissions
-Lists all users and groups that have explicit ACL entries applied to this specific file or folder.
-
-* **URL:** `/file/objects/{object_uuid}/permissions/`
-* **Method:** `GET`
-* **Success Response (200 OK):**
-```json
-[
-    {
-        "id": "permission-uuid-1",
-        "principal_id": "user-uuid-abc",
-        "principal_type": "user",
-        "allow_mask": 11,
-        "deny_mask": 0,
-        "inheritance_flags": "fd"
-    }
-]
-```
-
 ### Manage Permissions (Upsert, Overwrite, Remove)
-You can configure exactly how you want to alter permissions by changing the `opType`.
-
-* **URL:** `/file/objects/{object_uuid}/permissions/`
+* **URL:** `/file/objects/{object_uuid}/permissions/` 
+*(Note: `{object_uuid}` can be either a File ID or a Folder ID)*
 * **Method:** `PUT`
 
-#### Scenario A: Give a User Read/Write Access (opType: 1 = Upsert)
-If the user already has permissions, this modifies them. If not, it creates a new permission row.
+#### Scenario A: Give a User Read/Write Access to a File
+Set `principal_type` to `"user"`, and target the File's UUID.
 * **Body:**
 ```json
 {
     "opType": 1,
     "permissions": [
         {
-            "principal_id": "user-uuid-abc",
+            "principal_id": "USER-UUID-HERE",
             "principal_type": "user",
-            "allow_mask": 11,
+            "allow_mask": 3,
             "deny_mask": 0,
             "inheritance_flags": "fd"
         }
@@ -181,17 +161,17 @@ If the user already has permissions, this modifies them. If not, it creates a ne
 }
 ```
 
-#### Scenario B: Reset ALL Permissions for a Folder (opType: 2 = Overwrite All)
-Deletes EVERY existing permission on the folder and replaces it entirely with the array provided.
+#### Scenario B: Give a Group Access to a Folder
+Set `principal_type` to `"group"`, and target the Folder's UUID.
 * **Body:**
 ```json
 {
-    "opType": 2,
+    "opType": 1,
     "permissions": [
         {
-            "principal_id": "group-uuid-managers",
+            "principal_id": "GROUP-UUID-HERE",
             "principal_type": "group",
-            "allow_mask": 255,   // Full Access
+            "allow_mask": 255,   
             "deny_mask": 0,
             "inheritance_flags": "fd"
         }
@@ -199,17 +179,36 @@ Deletes EVERY existing permission on the folder and replaces it entirely with th
 }
 ```
 
-#### Scenario C: Remove a Specific User's Permissions (opType: 3 = Remove)
-Revokes all explicit permissions for the listed user(s) on this object.
-* **Body:**
-```json
-{
-    "opType": 3,
-    "permissions": [
-        {
-            "principal_id": "user-uuid-abc",
-            "principal_type": "user"
-        }
-    ]
-}
-```
+---
+
+## 4. Identity & Group Management
+
+To fully support the ACL system, you need to map users to bits of permissions and group them together logically.
+
+### List All Users
+Retrieves a list of all active users in the system.
+* **URL:** `/file/users/`
+* **Method:** `GET`
+* **Success Response (200 OK):** `[ { "id": "123e4567-e89b-...", "username": "admin", "email": "admin@example.com" } ]`
+
+### List or Create Groups
+* **URL:** `/file/groups/`
+* **Method:** `GET` (List all), `POST` (Create)
+* **POST Body:** `{"name": "Contractors", "parent_group": null}`
+
+### Manage a Specific Group
+* **URL:** `/file/groups/{group_uuid}/`
+* **Method:** `GET` (Retrieve), `PATCH` (Rename/Update parent), `DELETE` (Remove Group)
+
+### Manage Group Memberships
+Add or remove users from a specific security group.
+
+* **URL:** `/file/groups/{group_uuid}/members/`
+* **Method:** `GET`
+* **Success Response (200 OK):** Returns an array of User objects currently in the group.
+
+* **Method:** `POST` (Add User to Group)
+* **Body:** `{"user_id": "123e4567-e89b-..."}`
+
+* **Method:** `DELETE` (Remove User from Group)
+* **Body:** `{"user_id": "123e4567-e89b-..."}`

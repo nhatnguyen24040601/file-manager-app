@@ -5,11 +5,12 @@ from rest_framework.permissions import AllowAny
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.db import transaction
-from .models import SecurableObject, Folder, File, Permission, ObjectPath, ObjectType
+from .models import SecurableObject, Folder, File, Permission, ObjectPath, ObjectType, Group, GroupMembership
 from .serializers import (
     FolderSerializer, FileSerializer, PermissionSerializer, 
     SecurableObjectSerializer, NestedFolderSerializer,
-    FolderCreateSerializer, FileCreateSerializer, ObjectRenameSerializer
+    FolderCreateSerializer, FileCreateSerializer, ObjectRenameSerializer,
+    UserSerializer, GroupSerializer, GroupMembershipInputSerializer
 )
 
 User = get_user_model()
@@ -253,3 +254,105 @@ class ObjectDeleteView(APIView):
         obj.deleted_at = timezone.now()
         obj.save(update_fields=['deleted_at'])
         return Response({"status": "deleted"}, status=status.HTTP_204_NO_CONTENT)
+
+class UserListView(APIView):
+    """
+    GET: List all users for assigning permissions or adding to groups.
+    """
+    permission_classes = [AllowAny]
+    def get(self, request):
+        users = User.objects.all()
+        return Response(UserSerializer(users, many=True).data)
+
+class GroupListCreateView(APIView):
+    """
+    GET: List all groups.
+    POST: Create a new group.
+    """
+    permission_classes = [AllowAny]
+    def get(self, request):
+        groups = Group.objects.all()
+        return Response(GroupSerializer(groups, many=True).data)
+
+    def post(self, request):
+        serializer = GroupSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class GroupDetailView(APIView):
+    """
+    GET: Retrieve specific group.
+    PATCH: Update group (e.g., name or parent).
+    DELETE: Remove group.
+    """
+    permission_classes = [AllowAny]
+    def get_object(self, pk):
+        try:
+            return Group.objects.get(pk=pk)
+        except Group.DoesNotExist:
+            return None
+
+    def get(self, request, pk):
+        group = self.get_object(pk)
+        if not group: return Response(status=status.HTTP_404_NOT_FOUND)
+        return Response(GroupSerializer(group).data)
+
+    def patch(self, request, pk):
+        group = self.get_object(pk)
+        if not group: return Response(status=status.HTTP_404_NOT_FOUND)
+        serializer = GroupSerializer(group, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, pk):
+        group = self.get_object(pk)
+        if not group: return Response(status=status.HTTP_404_NOT_FOUND)
+        group.delete()
+        # Note: If there are foreign keys protecting deletion, Django will raise ProtectedError.
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+class GroupMembershipView(APIView):
+    """
+    GET: List users in group.
+    POST: Add user to group.
+    DELETE: Remove user from group.
+    """
+    permission_classes = [AllowAny]
+    def get(self, request, pk):
+        memberships = GroupMembership.objects.filter(group_id=pk).select_related('user')
+        users = [m.user for m in memberships]
+        return Response(UserSerializer(users, many=True).data)
+
+    @transaction.atomic
+    def post(self, request, pk):
+        try:
+            group = Group.objects.get(pk=pk)
+        except Group.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+            
+        serializer = GroupMembershipInputSerializer(data=request.data)
+        if serializer.is_valid():
+            user_id = serializer.validated_data['user_id']
+            try:
+                user = User.objects.get(pk=user_id)
+            except User.DoesNotExist:
+                return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+            
+            GroupMembership.objects.get_or_create(group=group, user=user)
+            return Response({"status": "user added to group"}, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @transaction.atomic
+    def delete(self, request, pk):
+        serializer = GroupMembershipInputSerializer(data=request.data)
+        if serializer.is_valid():
+            user_id = serializer.validated_data['user_id']
+            deleted, _ = GroupMembership.objects.filter(group_id=pk, user_id=user_id).delete()
+            if deleted == 0:
+                return Response({"error": "User was not in group."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"status": "user removed from group"}, status=status.HTTP_204_NO_CONTENT)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

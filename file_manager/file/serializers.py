@@ -1,5 +1,8 @@
 from rest_framework import serializers
+from django.contrib.auth import get_user_model
 from .models import SecurableObject, Folder, File, Permission, ObjectPath, Group
+
+User = get_user_model()
 
 class GroupSerializer(serializers.ModelSerializer):
     class Meta:
@@ -61,3 +64,11 @@ class FileCreateSerializer(serializers.Serializer):
 
 class ObjectRenameSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=255)
+
+class UserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'email']
+
+class GroupMembershipInputSerializer(serializers.Serializer):
+    user_id = serializers.UUIDField(required=True)

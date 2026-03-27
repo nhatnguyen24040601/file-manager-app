@@ -1,10 +1,15 @@
 from django.urls import path
 from .views import (
     FolderDetailView, FolderTreeView, ObjectPermissionView, ObjectMoveView,
-    FolderCreateView, FileCreateView, ObjectRenameView, ObjectDeleteView
+    FolderCreateView, FileCreateView, ObjectRenameView, ObjectDeleteView,
+    UserListView, GroupListCreateView, GroupDetailView, GroupMembershipView
 )
 
 urlpatterns = [
+    path('users/', UserListView.as_view(), name='user-list'),
+    path('groups/', GroupListCreateView.as_view(), name='group-list'),
+    path('groups/<uuid:pk>/', GroupDetailView.as_view(), name='group-detail'),
+    path('groups/<uuid:pk>/members/', GroupMembershipView.as_view(), name='group-members'),
     path('folders/', FolderCreateView.as_view(), name='folder-create'),
     path('folders/<uuid:pk>/', FolderDetailView.as_view(), name='folder-detail'),
     path('folders/<uuid:pk>/tree/', FolderTreeView.as_view(), name='folder-tree'),
